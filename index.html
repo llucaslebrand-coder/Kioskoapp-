@@ -269,7 +269,7 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
 </style>
 
 <!-- ZXing Barcode Scanner -->
-<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.18.6/umd/index.min.js"></script>
 
 <!-- Firebase SDKs -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -1898,97 +1898,81 @@ if ('serviceWorker' in navigator) {
 // CAMERA BARCODE SCANNER
 // ══════════════════════════════════════════════
 let codeReader = null;
-let camaraMode = null; // 'pos' | 'stock'
+let camaraMode = null;
 let camaraStream = null;
-let camaraDevices = [];
-let camaraSelectedId = null;
 
 async function abrirCamara(mode) {
   camaraMode = mode;
   document.getElementById('cam-title').textContent = mode === 'pos' ? '📷 Escanear para venta' : '📷 Escanear producto';
-  document.getElementById('cam-result').textContent = 'Buscando cámara...';
+  document.getElementById('cam-result').textContent = 'Iniciando cámara...';
   openModal('modal-camara');
+  iniciarEscaner();
+}
 
+async function iniciarEscaner() {
   try {
-    // Get available cameras
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    camaraDevices = devices.filter(d => d.kind === 'videoinput');
+    // Stop any existing stream
+    if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); camaraStream = null; }
+    if (codeReader) { try { codeReader.reset(); } catch(e){} codeReader = null; }
+
+    if (typeof ZXing === 'undefined') {
+      document.getElementById('cam-result').textContent = '❌ Librería de escáner no cargó. Revisá tu conexión.';
+      return;
+    }
+
+    codeReader = new ZXing.BrowserMultiFormatReader();
+
+    // Get devices to find back camera
+    const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
     const sel = document.getElementById('cam-select');
-    sel.innerHTML = camaraDevices.map((d, i) =>
+    sel.innerHTML = devices.map((d, i) =>
       `<option value="${d.deviceId}">${d.label || 'Cámara ' + (i+1)}</option>`
     ).join('');
 
-    // Prefer back camera
-    const back = camaraDevices.find(d => /back|rear|trasera|environment/i.test(d.label));
-    camaraSelectedId = back ? back.deviceId : (camaraDevices[0]?.deviceId || null);
+    // Pick back/environment camera
+    const back = devices.find(d => /back|rear|trasera|environment|2/i.test(d.label));
+    const deviceId = back ? back.deviceId : (devices[devices.length - 1]?.deviceId || undefined);
     if (back) sel.value = back.deviceId;
 
-    await iniciarCamaraStream(camaraSelectedId);
-  } catch(e) {
-    document.getElementById('cam-result').textContent = '❌ No se pudo acceder a la cámara. Verificá los permisos.';
-    console.error(e);
-  }
-}
+    document.getElementById('cam-result').textContent = '🔍 Apuntá al código de barras...';
 
-async function iniciarCamaraStream(deviceId) {
-  if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); }
-  const constraints = {
-    video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' }
-  };
-  camaraStream = await navigator.mediaDevices.getUserMedia(constraints);
-  const video = document.getElementById('cam-video');
-  video.srcObject = camaraStream;
-  await video.play();
-  document.getElementById('cam-result').textContent = 'Apuntá al código de barras...';
-  escanearConZXing();
-}
-
-function escanearConZXing() {
-  if (typeof ZXing === 'undefined') {
-    // Fallback: use imageCapture + canvas
-    escanearConCanvas();
-    return;
-  }
-  try {
-    codeReader = new ZXing.BrowserMultiFormatReader();
-    const video = document.getElementById('cam-video');
-    codeReader.decodeFromVideoElement(video, (result, err) => {
+    await codeReader.decodeFromVideoDevice(deviceId, 'cam-video', (result, err) => {
       if (result) {
         const code = result.getText();
         document.getElementById('cam-result').innerHTML = `✅ <strong>${code}</strong>`;
         cerrarCamara();
         handleBarcodeScanned(code);
       }
+      // Ignore errors — they fire continuously when no barcode in frame
     });
-  } catch(e) { escanearConCanvas(); }
-}
 
-let canvasScanInterval = null;
-function escanearConCanvas() {
-  const video = document.getElementById('cam-video');
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  document.getElementById('cam-result').textContent = 'Escaneando... (mantené fijo el código)';
-  canvasScanInterval = setInterval(() => {
-    if (!document.getElementById('modal-camara').classList.contains('open')) {
-      clearInterval(canvasScanInterval); return;
-    }
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-  }, 300);
+  } catch(e) {
+    document.getElementById('cam-result').textContent = '❌ No se pudo acceder a la cámara. Verificá los permisos.';
+    console.error('Camera error:', e);
+  }
 }
 
 async function cambiarCamara(deviceId) {
-  camaraSelectedId = deviceId;
   if (codeReader) { try { codeReader.reset(); } catch(e){} codeReader = null; }
-  await iniciarCamaraStream(deviceId);
+  document.getElementById('cam-result').textContent = '🔍 Apuntá al código de barras...';
+  try {
+    codeReader = new ZXing.BrowserMultiFormatReader();
+    await codeReader.decodeFromVideoDevice(deviceId, 'cam-video', (result, err) => {
+      if (result) {
+        const code = result.getText();
+        cerrarCamara();
+        handleBarcodeScanned(code);
+      }
+    });
+  } catch(e) { console.error(e); }
 }
 
 function cerrarCamara() {
   if (codeReader) { try { codeReader.reset(); } catch(e){} codeReader = null; }
-  if (canvasScanInterval) { clearInterval(canvasScanInterval); canvasScanInterval = null; }
   if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); camaraStream = null; }
+  // Also stop video element tracks
+  const video = document.getElementById('cam-video');
+  if (video && video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
   closeModal('modal-camara');
 }
 
