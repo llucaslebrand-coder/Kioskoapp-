@@ -268,8 +268,6 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
 }
 </style>
 
-<!-- ZXing Barcode Scanner -->
-<script src="https://unpkg.com/@zxing/library@0.18.6/umd/index.min.js"></script>
 
 <!-- Firebase SDKs -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -289,7 +287,7 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
     <input type="password" class="login-input" id="login-pass" placeholder="Contraseña" onkeydown="if(event.key==='Enter')doLogin()">
     <div class="login-error" id="login-error"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="doLogin()">Ingresar</button>
-    <div class="login-hint" id="login-hint">Admin: <strong>admin123</strong> &nbsp;|&nbsp; Usuario: <strong>usuario</strong></div>
+    <div class="login-hint" id="login-hint">Ingresá tu contraseña</div>
     <div class="sync-login-status" id="sync-login-status">⏳ Conectando con Firebase...</div>
   </div>
 </div>
@@ -1090,7 +1088,7 @@ function doLogin() {
     document.getElementById('login-error').textContent='';
     applyRole();
   } else {
-    document.getElementById('login-error').textContent='❌ Contraseña incorrecta. Admin: admin123 / Usuario: usuario';
+    document.getElementById('login-error').textContent='❌ Contraseña incorrecta';
   }
 }
 window.doLogin = doLogin;
@@ -1895,89 +1893,84 @@ if ('serviceWorker' in navigator) {
 }
 
 // ══════════════════════════════════════════════
-// CAMERA BARCODE SCANNER
+// CAMERA BARCODE SCANNER (Native BarcodeDetector)
 // ══════════════════════════════════════════════
-let codeReader = null;
 let camaraMode = null;
 let camaraStream = null;
+let scanInterval = null;
 
 async function abrirCamara(mode) {
   camaraMode = mode;
   document.getElementById('cam-title').textContent = mode === 'pos' ? '📷 Escanear para venta' : '📷 Escanear producto';
   document.getElementById('cam-result').textContent = 'Iniciando cámara...';
   openModal('modal-camara');
-  iniciarEscaner();
-}
 
-async function iniciarEscaner() {
   try {
-    // Stop any existing stream
-    if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); camaraStream = null; }
-    if (codeReader) { try { codeReader.reset(); } catch(e){} codeReader = null; }
+    // Request camera — prefer back camera
+    camaraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
 
-    if (typeof ZXing === 'undefined') {
-      document.getElementById('cam-result').textContent = '❌ Librería de escáner no cargó. Revisá tu conexión.';
-      return;
-    }
+    const video = document.getElementById('cam-video');
+    video.srcObject = camaraStream;
+    await video.play();
 
-    codeReader = new ZXing.BrowserMultiFormatReader();
-
-    // Get devices to find back camera
-    const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+    // Populate camera selector
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
     const sel = document.getElementById('cam-select');
-    sel.innerHTML = devices.map((d, i) =>
-      `<option value="${d.deviceId}">${d.label || 'Cámara ' + (i+1)}</option>`
-    ).join('');
-
-    // Pick back/environment camera
-    const back = devices.find(d => /back|rear|trasera|environment|2/i.test(d.label));
-    const deviceId = back ? back.deviceId : (devices[devices.length - 1]?.deviceId || undefined);
-    if (back) sel.value = back.deviceId;
+    sel.innerHTML = cams.map((d,i) => `<option value="${d.deviceId}">${d.label||'Cámara '+(i+1)}</option>`).join('');
 
     document.getElementById('cam-result').textContent = '🔍 Apuntá al código de barras...';
 
-    await codeReader.decodeFromVideoDevice(deviceId, 'cam-video', (result, err) => {
-      if (result) {
-        const code = result.getText();
-        document.getElementById('cam-result').innerHTML = `✅ <strong>${code}</strong>`;
-        cerrarCamara();
-        handleBarcodeScanned(code);
-      }
-      // Ignore errors — they fire continuously when no barcode in frame
-    });
+    // Use BarcodeDetector if available (Android Chrome 83+)
+    if ('BarcodeDetector' in window) {
+      const detector = new BarcodeDetector({ formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code'] });
+      scanInterval = setInterval(async () => {
+        if (!video.videoWidth) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length > 0) {
+            const code = codes[0].rawValue;
+            document.getElementById('cam-result').innerHTML = `✅ <strong>${code}</strong>`;
+            cerrarCamara();
+            handleBarcodeScanned(code);
+          }
+        } catch(e) {}
+      }, 300);
+    } else {
+      // Fallback: canvas snapshot every 500ms shown to user
+      document.getElementById('cam-result').innerHTML = 
+        '⚠️ Tu navegador no soporta escáner automático.<br>Usá el lector USB o escribí el código manualmente.';
+    }
 
   } catch(e) {
-    document.getElementById('cam-result').textContent = '❌ No se pudo acceder a la cámara. Verificá los permisos.';
-    console.error('Camera error:', e);
+    document.getElementById('cam-result').textContent = '❌ No se pudo acceder a la cámara. Verificá los permisos en Chrome.';
+    console.error(e);
   }
 }
 
 async function cambiarCamara(deviceId) {
-  if (codeReader) { try { codeReader.reset(); } catch(e){} codeReader = null; }
-  document.getElementById('cam-result').textContent = '🔍 Apuntá al código de barras...';
+  if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+  if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); }
   try {
-    codeReader = new ZXing.BrowserMultiFormatReader();
-    await codeReader.decodeFromVideoDevice(deviceId, 'cam-video', (result, err) => {
-      if (result) {
-        const code = result.getText();
-        cerrarCamara();
-        handleBarcodeScanned(code);
-      }
-    });
+    camaraStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+    const video = document.getElementById('cam-video');
+    video.srcObject = camaraStream;
+    await video.play();
   } catch(e) { console.error(e); }
 }
 
 function cerrarCamara() {
-  if (codeReader) { try { codeReader.reset(); } catch(e){} codeReader = null; }
+  if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
   if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); camaraStream = null; }
-  // Also stop video element tracks
   const video = document.getElementById('cam-video');
-  if (video && video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+  if (video) { video.srcObject = null; }
   closeModal('modal-camara');
 }
 
-function abrirCamaraPOS()    { abrirCamara('pos'); }
-function abrirCamaraStock()  { abrirCamara('stock'); }
+function abrirCamaraPOS()   { abrirCamara('pos'); }
+function abrirCamaraStock() { abrirCamara('stock'); }
 window.abrirCamaraPOS   = abrirCamaraPOS;
 window.abrirCamaraStock = abrirCamaraStock;
 window.cerrarCamara     = cerrarCamara;
