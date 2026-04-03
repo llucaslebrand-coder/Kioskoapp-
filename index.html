@@ -1020,25 +1020,55 @@ async function initFirestore() {
       await db.collection('kiosco').doc('config').set(config);
     }
 
-    // Load productos
+    // Load productos — migrate from localStorage if Firebase is empty
     const prodSnap = await db.collection('productos').get();
     if (prodSnap.empty) {
-      // Seed
+      // Check localStorage for products to migrate
+      let localProds = [];
+      try { localProds = JSON.parse(localStorage.getItem('kiosco_productos')) || []; } catch(e) {}
+
+      const toSeed = localProds.length > 0 ? localProds : SEED_PRODUCTS;
+      setSyncLoginStatus('⏳ Migrando productos...');
       const batch = db.batch();
-      SEED_PRODUCTS.forEach(p => batch.set(db.collection('productos').doc(p.id), p));
+      toSeed.forEach(p => {
+        const id = String(p.id);
+        batch.set(db.collection('productos').doc(id), {...p, id});
+      });
       await batch.commit();
-      productos = [...SEED_PRODUCTS];
+      productos = toSeed.map(p => ({...p, id: String(p.id)}));
     } else {
       productos = prodSnap.docs.map(d => ({...d.data(), id: d.id}));
     }
 
-    // Load ventas
+    // Load ventas — migrate from localStorage if Firebase is empty
     const ventasSnap = await db.collection('ventas').get();
-    ventas = ventasSnap.docs.map(d => ({...d.data(), id: d.id}));
+    if (ventasSnap.empty) {
+      let localVentas = [];
+      try { localVentas = JSON.parse(localStorage.getItem('kiosco_ventas')) || []; } catch(e) {}
+      if (localVentas.length > 0) {
+        const batch2 = db.batch();
+        localVentas.forEach(v => batch2.set(db.collection('ventas').doc(String(v.id)), {...v, id: String(v.id)}));
+        await batch2.commit();
+      }
+      ventas = localVentas.map(v => ({...v, id: String(v.id)}));
+    } else {
+      ventas = ventasSnap.docs.map(d => ({...d.data(), id: d.id}));
+    }
 
-    // Load proveedores
+    // Load proveedores — migrate from localStorage if Firebase is empty
     const provSnap = await db.collection('proveedores').get();
-    proveedores = provSnap.docs.map(d => ({...d.data(), id: d.id}));
+    if (provSnap.empty) {
+      let localProvs = [];
+      try { localProvs = JSON.parse(localStorage.getItem('kiosco_proveedores')) || []; } catch(e) {}
+      if (localProvs.length > 0) {
+        const batch3 = db.batch();
+        localProvs.forEach(p => batch3.set(db.collection('proveedores').doc(String(p.id)), {...p, id: String(p.id)}));
+        await batch3.commit();
+      }
+      proveedores = localProvs.map(p => ({...p, id: String(p.id)}));
+    } else {
+      proveedores = provSnap.docs.map(d => ({...d.data(), id: d.id}));
+    }
 
     // Real-time listeners
     db.collection('productos').onSnapshot(snap => {
@@ -2181,17 +2211,28 @@ let camaraStream = null;
 let scanInterval = null;
 let jsQRLoaded = false;
 
-// Load jsQR dynamically
+// Load ZXing dynamically for fallback
+function loadZXing(cb) {
+  if (window.ZXing) { cb(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.18.6/umd/index.min.js';
+  s.onload = () => cb();
+  s.onerror = () => {
+    // fallback to jsQR if ZXing fails
+    loadJsQR(cb);
+  };
+  document.head.appendChild(s);
+}
+
+// Load jsQR as secondary fallback
 function loadJsQR(cb) {
   if (window.jsQR) { cb(); return; }
   const s = document.createElement('script');
   s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
-  s.onload = () => { jsQRLoaded = true; cb(); };
+  s.onload = () => cb();
   s.onerror = () => cb(new Error('jsQR no cargó'));
   document.head.appendChild(s);
 }
-
-async function abrirCamara(mode) {
   camaraMode = mode;
   document.getElementById('cam-title').textContent = mode === 'pos' ? '📷 Escanear para venta' : '📷 Escanear producto';
   document.getElementById('cam-result').textContent = 'Iniciando cámara...';
@@ -2235,38 +2276,25 @@ async function abrirCamara(mode) {
         } catch(e) {}
       }, 250);
     } else {
-      // jsQR fallback — works on iPhone Safari, Samsung, Xiaomi
-      loadJsQR((err) => {
-        if (err) {
-          document.getElementById('cam-result').textContent = '❌ No se pudo cargar el escáner. Verificá tu conexión.';
-          return;
-        }
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        // Wait for video to be fully ready (important for iPhone Safari)
-        let attempts = 0;
-        function startScan() {
-          if (video.readyState < 2 && attempts < 20) {
-            attempts++;
-            setTimeout(startScan, 200);
-            return;
-          }
-          scanInterval = setInterval(() => {
-            if (!document.getElementById('modal-camara').classList.contains('open')) return;
-            if (!video.videoWidth || !video.videoHeight) return;
-            try {
-              canvas.width  = video.videoWidth;
-              canvas.height = video.videoHeight;
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
-              if (code && code.data) {
-                procesarCodigoEscaneado(code.data);
+      // ZXing fallback — works on iPhone Safari, Samsung, Xiaomi
+      loadZXing(() => {
+        if (window.ZXing) {
+          // Use ZXing decodeFromVideoDevice — best iOS support
+          try {
+            const reader = new ZXing.BrowserMultiFormatReader();
+            window._zxingReader = reader;
+            reader.decodeFromVideoDevice(undefined, 'cam-video', (result, err) => {
+              if (result) {
+                procesarCodigoEscaneado(result.getText());
               }
-            } catch(e) {}
-          }, 300);
+            });
+          } catch(e) {
+            // ZXing failed, try jsQR canvas approach
+            usarJsQR(video);
+          }
+        } else {
+          usarJsQR(video);
         }
-        startScan();
       });
     }
 
@@ -2274,6 +2302,33 @@ async function abrirCamara(mode) {
     document.getElementById('cam-result').textContent = '❌ No se pudo acceder a la cámara. Verificá los permisos.';
     console.error(e);
   }
+}
+
+function usarJsQR(video) {
+  loadJsQR((err) => {
+    if (err || !window.jsQR) {
+      document.getElementById('cam-result').textContent = '❌ No se pudo cargar el escáner.';
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    let attempts = 0;
+    function startScan() {
+      if (video.readyState < 2 && attempts < 20) { attempts++; setTimeout(startScan, 200); return; }
+      scanInterval = setInterval(() => {
+        if (!document.getElementById('modal-camara').classList.contains('open')) return;
+        if (!video.videoWidth || !video.videoHeight) return;
+        try {
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
+          if (code && code.data) procesarCodigoEscaneado(code.data);
+        } catch(e) {}
+      }, 300);
+    }
+    startScan();
+  });
 }
 
 async function cambiarCamara(deviceId) {
@@ -2289,6 +2344,7 @@ async function cambiarCamara(deviceId) {
 
 function cerrarCamara() {
   if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+  if (window._zxingReader) { try { window._zxingReader.reset(); } catch(e){} window._zxingReader = null; }
   if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); camaraStream = null; }
   const video = document.getElementById('cam-video');
   if (video) { video.srcObject = null; }
