@@ -2374,11 +2374,27 @@ async function iniciarEscanerConsulta() {
 }
 
 
+// Global error handler — prevents JS errors from breaking the UI
+window.onerror = function(msg, src, line, col, err) {
+  console.error('App error:', msg, 'line:', line);
+  return false; // don't suppress
+};
+
 // ══════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════
 renderCart();
-initFirestore();
+try {
+  initFirestore().catch(e => {
+    console.error('Firebase:', e);
+    setSyncStatus('error', 'Error de conexión');
+    setSyncLoginStatus('⚠️ Sin conexión — datos locales');
+    loadFromLocalStorage();
+  });
+} catch(e) {
+  console.error('Init error:', e);
+  loadFromLocalStorage();
+}
 
 </script>
 </body>
