@@ -1025,7 +1025,7 @@ async function initFirestore() {
     if (prodSnap.empty) {
       // Seed
       const batch = db.batch();
-      SEED_PRODUCTS.forEach(p => batch.set(doc(db,'productos',p.id), p));
+      SEED_PRODUCTS.forEach(p => batch.set(db.collection('productos').doc(p.id), p));
       await batch.commit();
       productos = [...SEED_PRODUCTS];
     } else {
