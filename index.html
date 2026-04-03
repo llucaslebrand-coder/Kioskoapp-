@@ -1932,17 +1932,10 @@ function setScanStatus(page,active,text){
   const t=document.getElementById(page+'-scan-text'); if(t) t.textContent=text;
   if(active) setTimeout(()=>setScanStatus(page,false,'Listo para escanear'),1500);
 }
-function handleBarcodeScanned(code){
-  const page=getActivePage();
-  if(page==='pos'){
-    const p=productos.find(x=>x.barcode&&x.barcode===code);
-    if(p){ addToCart(p.id); setScanStatus('pos',true,'✔ '+p.nombre); }
-    else{ setScanStatus('pos',true,'⚠ No encontrado'); toast('Código no encontrado: '+code,'error'); }
-  } else if(page==='stock'){
-    const p=productos.find(x=>x.barcode&&x.barcode===code);
-    if(p){ setScanStatus('stock',true,'✔ '+p.nombre); editProducto(p.id); }
-    else{ setScanStatus('stock',true,'Nuevo: '+code); openModal('modal-producto'); setTimeout(()=>{ const el=document.getElementById('prod-barcode'); if(el) el.value=code; document.getElementById('barcode-scan-indicator').style.display='inline'; toast('Código '+code+' cargado'); },100); }
-  }
+function procesarCodigoEscaneado(code) {
+  // Close camera first, then process
+  cerrarCamara();
+  handleBarcodeScanned(code);
 }
 document.addEventListener('keydown',e=>{
   const tag=document.activeElement.tagName;
@@ -2134,17 +2127,26 @@ async function iniciarEscanerConsulta() {
 }
 window.abrirCamaraConsulta=abrirCamaraConsulta; window.cerrarCamaraConsulta=cerrarCamaraConsulta;
 
-// Handle barcode scan from USB in consulta mode
-const _origHandleBarcode = handleBarcodeScanned;
+// Handle barcode scan from USB or camera in any mode
 function handleBarcodeScanned(code) {
-  const posIdle   = document.getElementById('pos-idle');
+  // If consulta panel is visible
   const posConsulta = document.getElementById('pos-consulta');
   if (posConsulta && posConsulta.style.display !== 'none') {
     document.getElementById('consulta-search').value = code;
     renderConsulta();
     return;
   }
-  _origHandleBarcode(code);
+  // If venta panel visible or camaraMode = pos
+  const page = getActivePage();
+  if (page === 'pos') {
+    const p = productos.find(x => x.barcode && x.barcode === code);
+    if (p) { addToCart(p.id); setScanStatus('pos', true, '✔ ' + p.nombre); toast('✔ ' + p.nombre + ' agregado'); }
+    else { setScanStatus('pos', true, '⚠ No encontrado'); toast('Código no encontrado: ' + code, 'error'); }
+  } else if (page === 'stock') {
+    const p = productos.find(x => x.barcode && x.barcode === code);
+    if (p) { setScanStatus('stock', true, '✔ ' + p.nombre); editProducto(p.id); }
+    else { setScanStatus('stock', true, 'Nuevo: ' + code); openModal('modal-producto'); setTimeout(() => { const el = document.getElementById('prod-barcode'); if (el) el.value = code; document.getElementById('barcode-scan-indicator').style.display = 'inline'; toast('Código ' + code + ' cargado'); }, 100); }
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -2228,9 +2230,7 @@ async function abrirCamara(mode) {
           const codes = await detector.detect(video);
           if (codes.length > 0) {
             const code = codes[0].rawValue;
-            document.getElementById('cam-result').innerHTML = `✅ <strong>${code}</strong>`;
-            cerrarCamara();
-            handleBarcodeScanned(code);
+            procesarCodigoEscaneado(code);
           }
         } catch(e) {}
       }, 250);
@@ -2251,9 +2251,7 @@ async function abrirCamara(mode) {
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
           if (code) {
-            document.getElementById('cam-result').innerHTML = `✅ <strong>${code.data}</strong>`;
-            cerrarCamara();
-            handleBarcodeScanned(code.data);
+            procesarCodigoEscaneado(code.data);
           }
         }, 250);
       });
