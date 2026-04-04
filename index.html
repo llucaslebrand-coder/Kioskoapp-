@@ -689,6 +689,7 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
       <label>Código de barras</label>
       <div style="display:flex;gap:7px;align-items:center;">
         <input type="text" id="prod-barcode" placeholder="Escaneá o escribí el código" style="font-family:monospace;letter-spacing:1px;flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:0.875rem;">
+        <button class="btn btn-ghost btn-sm" onclick="abrirCamaraBarcode()" type="button" style="white-space:nowrap;">📷 Escanear</button>
         <span id="barcode-scan-indicator" style="font-size:1.1rem;display:none;">✅</span>
       </div>
     </div>
@@ -2159,6 +2160,17 @@ window.abrirCamaraConsulta=abrirCamaraConsulta; window.cerrarCamaraConsulta=cerr
 
 // Handle barcode scan from USB or camera in any mode
 function handleBarcodeScanned(code) {
+  // If barcode field modal is open — fill the field
+  const modal = document.getElementById('modal-producto');
+  if (modal && modal.classList.contains('open')) {
+    const el = document.getElementById('prod-barcode');
+    if (el) {
+      el.value = code;
+      document.getElementById('barcode-scan-indicator').style.display = 'inline';
+      toast('Código ' + code + ' cargado');
+    }
+    return;
+  }
   // If consulta panel is visible
   const posConsulta = document.getElementById('pos-consulta');
   if (posConsulta && posConsulta.style.display !== 'none') {
@@ -2166,7 +2178,7 @@ function handleBarcodeScanned(code) {
     renderConsulta();
     return;
   }
-  // If venta panel visible or camaraMode = pos
+  // POS venta or stock
   const page = getActivePage();
   if (page === 'pos') {
     const p = productos.find(x => x.barcode && x.barcode === code);
@@ -2318,8 +2330,10 @@ function cerrarCamara() {
   closeModal('modal-camara');
 }
 
+function abrirCamaraBarcode() { abrirCamara('barcode'); }
 function abrirCamaraPOS()   { abrirCamara('pos'); }
 function abrirCamaraStock() { abrirCamara('stock'); }
+window.abrirCamaraBarcode = abrirCamaraBarcode;
 window.abrirCamaraPOS   = abrirCamaraPOS;
 window.abrirCamaraStock = abrirCamaraStock;
 window.cerrarCamara     = cerrarCamara;
