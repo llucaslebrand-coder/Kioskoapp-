@@ -2220,6 +2220,8 @@ function loadJsQR(cb) {
   s.onerror = () => cb(new Error('jsQR no cargó'));
   document.head.appendChild(s);
 }
+
+async function abrirCamara(mode) {
   camaraMode = mode;
   document.getElementById('cam-title').textContent = mode === 'pos' ? '📷 Escanear para venta' : '📷 Escanear producto';
   document.getElementById('cam-result').textContent = 'Iniciando cámara...';
