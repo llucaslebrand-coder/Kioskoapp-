@@ -1122,7 +1122,14 @@ function saveToLocalStorage() {
 async function saveProducto(p) {
   if (dbReady) {
     setSyncStatus('syncing','Guardando...');
-    await db.collection('productos').doc(String(p.id)).set(p);
+    try {
+      await db.collection('productos').doc(String(p.id)).set(p);
+      setSyncStatus('ok','Sincronizado');
+    } catch(e) {
+      console.error('Error guardando producto:', e);
+      setSyncStatus('error','Error al guardar');
+      toast('Error al guardar. Revisá la conexión.', 'error');
+    }
   } else {
     saveToLocalStorage();
   }
@@ -1742,10 +1749,16 @@ window.deleteProveedor=deleteProveedor;
 function renderPedidos(){
   const pf=document.getElementById('pedido-proveedor-filtro');
   const pd=document.getElementById('pedido-dest-prov');
+  // Save current values before rebuilding selects
+  const savedProvFiltro = pf ? pf.value : '';
+  const savedProvDest   = pd ? pd.value : '';
   if(pf) pf.innerHTML='<option value="">Todos los proveedores</option>'+proveedores.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('');
   if(pd) pd.innerHTML='<option value="">Seleccioná...</option>'+proveedores.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('');
+  // Restore saved values
+  if(pf && savedProvFiltro) pf.value = savedProvFiltro;
+  if(pd && savedProvDest)   pd.value = savedProvDest;
   const filtro=(document.getElementById('pedido-filtro')||{value:'bajo'}).value;
-  const provFId=(document.getElementById('pedido-proveedor-filtro')||{value:''}).value;
+  const provFId=pf ? pf.value : '';
   const q=(document.getElementById('pedido-search')||{value:''}).value.toLowerCase();
   const lista=productos.filter(p=>{
     if(q&&!p.nombre.toLowerCase().includes(q)) return false;
@@ -2286,21 +2299,41 @@ async function abrirCamara(mode) {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         let attempts = 0;
+        let frameCount = 0;
         function startScan() {
-          if (video.readyState < 2 && attempts < 20) { attempts++; setTimeout(startScan, 200); return; }
+          if ((video.readyState < 2 || video.videoWidth === 0) && attempts < 30) {
+            attempts++;
+            setTimeout(startScan, 300);
+            return;
+          }
+          document.getElementById('cam-result').textContent = '🔍 Apuntá al código de barras...';
           scanInterval = setInterval(() => {
             if (!document.getElementById('modal-camara').classList.contains('open')) return;
-            if (!video.videoWidth || !video.videoHeight) return;
+            if (!video.videoWidth || !video.videoHeight || video.paused) return;
             try {
-              canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              // Use actual video dimensions for best results on iPhone
+              const w = video.videoWidth;
+              const h = video.videoHeight;
+              if (canvas.width !== w) canvas.width = w;
+              if (canvas.height !== h) canvas.height = h;
+              ctx.drawImage(video, 0, 0, w, h);
+              const img = ctx.getImageData(0, 0, w, h);
               const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
-              if (code && code.data) procesarCodigoEscaneado(code.data);
+              if (code && code.data) {
+                procesarCodigoEscaneado(code.data);
+              } else {
+                // Show scanning indicator
+                frameCount++;
+                if (frameCount % 5 === 0) {
+                  const dots = '.'.repeat((frameCount / 5 % 3) + 1);
+                  document.getElementById('cam-result').textContent = '🔍 Escaneando' + dots;
+                }
+              }
             } catch(e) {}
-          }, 300);
+          }, 200);
         }
-        startScan();
+        // Extra wait for iPhone camera to fully initialize
+        setTimeout(startScan, 500);
       });
     }
 
