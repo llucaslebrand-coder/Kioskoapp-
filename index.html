@@ -2113,10 +2113,15 @@ function volverPosIdle() {
 window.iniciarVenta=iniciarVenta; window.iniciarConsultaPrecio=iniciarConsultaPrecio; window.volverPosIdle=volverPosIdle;
 
 function renderConsulta() {
-  const q = document.getElementById('consulta-search').value.toLowerCase();
+  const q = document.getElementById('consulta-search').value.trim();
   const el = document.getElementById('consulta-result'); if(!el) return;
   if (!q) { el.innerHTML=''; return; }
-  const found = productos.filter(p => p.nombre.toLowerCase().includes(q) || (p.barcode&&p.barcode.includes(q)));
+  const ql = q.toLowerCase();
+  // Try fuzzy barcode match first, then name search
+  const porBarcode = buscarProductoPorBarcode(q);
+  const found = porBarcode
+    ? [porBarcode]
+    : productos.filter(p => p.nombre.toLowerCase().includes(ql) || (p.barcode && p.barcode.includes(q)));
   if (!found.length) { el.innerHTML=`<div class="empty-state">No se encontró ningún producto</div>`; return; }
   el.innerHTML = found.map(p => `
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow);">
