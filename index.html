@@ -269,6 +269,7 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
 </style>
 
 
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- Firebase SDKs -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -443,6 +444,10 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
           <span>📷</span><span id="stock-scan-text">Listo para escanear</span>
         </div>
       </div>
+      <button class="btn btn-ghost btn-sm" onclick="exportarExcel()" title="Exportar productos a Excel">📥 Excel</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-excel-input').click()" title="Importar desde Excel">📤 Importar</button>
+      <input type="file" id="import-excel-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="importarExcel(this)">
+      <button class="btn btn-ghost btn-sm" onclick="abrirModalAumento()">📈 Aumento</button>
       <button class="btn btn-primary" onclick="openModal('modal-producto')">+ Nuevo Producto</button>
     </div>
   </div>
@@ -856,6 +861,53 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
   </div>
 </div>
 
+<!-- MODAL AUMENTO MASIVO -->
+<div class="modal-overlay" id="modal-aumento">
+  <div class="modal" style="width:420px;">
+    <h2>📈 Aumento de precios</h2>
+    <p style="color:var(--muted);font-size:0.83rem;margin-bottom:16px;">Aplicá un aumento al costo y recalculá el precio de venta con margen real.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Proveedor</label>
+        <select id="aumento-proveedor" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.875rem;">
+          <option value="">Todos los productos</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Categoría</label>
+        <select id="aumento-cat" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.875rem;">
+          <option value="">Todas las categorías</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>% Aumento sobre el costo</label>
+        <input type="number" id="aumento-pct" placeholder="Ej: 15" min="0" max="500" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.875rem;">
+      </div>
+      <div class="form-group">
+        <label>% Margen de venta</label>
+        <input type="number" id="aumento-margen" placeholder="Ej: 30" min="1" max="99" value="30" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.875rem;">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Redondeo del precio de venta</label>
+      <select id="aumento-redondeo" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.875rem;">
+        <option value="1">Sin redondeo</option>
+        <option value="10">A $10</option>
+        <option value="50" selected>A $50</option>
+        <option value="100">A $100</option>
+      </select>
+    </div>
+    <div id="aumento-preview" style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:0.82rem;color:var(--muted);display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-aumento')">Cancelar</button>
+      <button class="btn btn-ghost" onclick="previsualizarAumento()">👁 Previsualizar</button>
+      <button class="btn btn-primary" onclick="aplicarAumento()">✔ Aplicar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL CÁMARA CONSULTA -->
 <div class="modal-overlay" id="modal-camara-consulta">
   <div class="modal" style="width:360px;text-align:center;">
@@ -876,13 +928,28 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
   <div class="modal" style="width:360px;text-align:center;">
     <h2 id="cam-title">📷 Escanear código</h2>
     <p style="color:var(--muted);font-size:0.8rem;margin-bottom:12px;">Apuntá la cámara al código de barras</p>
-    <div style="position:relative;border-radius:12px;overflow:hidden;background:#000;margin-bottom:14px;">
-      <video id="cam-video" style="width:100%;max-height:260px;object-fit:cover;display:block;" playsinline autoplay></video>
-      <div style="position:absolute;inset:0;border:3px solid var(--blue);border-radius:12px;pointer-events:none;opacity:0.6;"></div>
-      <div id="cam-line" style="position:absolute;left:10%;right:10%;height:2px;background:var(--accent);top:50%;transform:translateY(-50%);box-shadow:0 0 8px var(--accent);"></div>
+
+    <!-- iOS: input nativo con capture -->
+    <div id="ios-scan-area" style="display:none;margin-bottom:14px;">
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;">Tocá el botón para abrir la cámara de iOS</p>
+      <label style="display:inline-block;background:var(--blue);color:#fff;padding:12px 24px;border-radius:10px;cursor:pointer;font-weight:600;font-size:1rem;">
+        📷 Abrir cámara
+        <input type="file" accept="image/*" capture="environment" id="ios-barcode-input" style="display:none;" onchange="procesarImageniOS(this)">
+      </label>
+      <div id="ios-scan-result" style="margin-top:12px;font-size:0.85rem;color:var(--muted);"></div>
     </div>
+
+    <!-- Android/PC: video stream -->
+    <div id="video-scan-area">
+      <div style="position:relative;border-radius:12px;overflow:hidden;background:#000;margin-bottom:14px;">
+        <video id="cam-video" style="width:100%;max-height:260px;object-fit:cover;display:block;" playsinline autoplay muted></video>
+        <div style="position:absolute;inset:0;border:3px solid var(--blue);border-radius:12px;pointer-events:none;opacity:0.6;"></div>
+        <div id="cam-line" style="position:absolute;left:10%;right:10%;height:2px;background:var(--accent);top:50%;transform:translateY(-50%);box-shadow:0 0 8px var(--accent);"></div>
+      </div>
+    </div>
+
     <div id="cam-result" style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;min-height:20px;"></div>
-    <div style="display:flex;gap:8px;justify-content:center;">
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
       <button class="btn btn-ghost" onclick="cerrarCamara()">Cancelar</button>
       <select id="cam-select" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.83rem;" onchange="cambiarCamara(this.value)">
         <option value="">Cámara trasera</option>
@@ -2028,7 +2095,236 @@ if ('serviceWorker' in navigator) {
 }
 
 // ══════════════════════════════════════════════
-// CATEGORÍAS DINÁMICAS
+// EXCEL EXPORT / IMPORT / AUMENTO MASIVO
+// ══════════════════════════════════════════════
+
+function exportarExcel() {
+  if (!window.XLSX) { toast('Cargando librería Excel...', 'info'); return; }
+  const provMap = {};
+  proveedores.forEach(p => provMap[p.id] = p.nombre);
+
+  const data = [
+    ['id','nombre','barcode','categoria','costo','precio_venta','margen_%','stock','stock_minimo','proveedor']
+  ];
+  productos.forEach(p => {
+    const margen = p.costo > 0 ? (((p.precio - p.costo) / p.precio) * 100).toFixed(1) : '';
+    data.push([
+      p.id, p.nombre, p.barcode||'', p.cat,
+      p.costo||0, p.precio||0, margen,
+      p.stock||0, p.minimo||5,
+      provMap[p.provId]||''
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+
+  // Column widths
+  ws['!cols'] = [
+    {wch:8},{wch:35},{wch:18},{wch:15},
+    {wch:12},{wch:14},{wch:12},
+    {wch:8},{wch:12},{wch:20}
+  ];
+
+  // Style header row
+  const headerStyle = { font:{bold:true,color:{rgb:'FFFFFF'}}, fill:{fgColor:{rgb:'1A4FC4'}}, alignment:{horizontal:'center'} };
+  ['A1','B1','C1','D1','E1','F1','G1','H1','I1','J1'].forEach(cell => {
+    if (ws[cell]) ws[cell].s = headerStyle;
+  });
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Productos');
+
+  // Add instructions sheet
+  const instrData = [
+    ['INSTRUCCIONES DE USO'],
+    [''],
+    ['1. Modificá los valores en la hoja "Productos"'],
+    ['2. NO cambies la columna "id" — es el identificador único'],
+    ['3. Columnas que podés modificar: nombre, barcode, categoria, costo, precio_venta, stock, stock_minimo, proveedor'],
+    ['4. La columna "margen_%" es informativa, no se importa'],
+    ['5. Para agregar productos nuevos: dejá el id vacío o escribí "nuevo"'],
+    ['6. Guardá el archivo y volvé a importarlo en la app'],
+    [''],
+    ['FÓRMULA DE PRECIO (Margen Real)'],
+    ['precio_venta = costo / (1 - margen/100)'],
+    ['Ejemplo: costo $100, margen 30% → precio = 100 / (1-0.30) = $142.86'],
+  ];
+  const wsInstr = XLSX.utils.aoa_to_sheet(instrData);
+  wsInstr['!cols'] = [{wch:60}];
+  XLSX.utils.book_append_sheet(wb, wsInstr, 'Instrucciones');
+
+  XLSX.writeFile(wb, `KioscoApp_Productos_${new Date().toISOString().slice(0,10)}.xlsx`);
+  toast('✅ Excel exportado correctamente');
+}
+window.exportarExcel = exportarExcel;
+
+async function importarExcel(input) {
+  const file = input.files[0]; if (!file) return;
+  if (!window.XLSX) { toast('Cargando librería...'); return; }
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'binary' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      if (!rows.length) { toast('El archivo está vacío', 'error'); return; }
+
+      // Validate columns
+      const required = ['nombre'];
+      const firstRow = rows[0];
+      if (!required.every(k => k in firstRow)) {
+        toast('El archivo no tiene la columna "nombre"', 'error'); return;
+      }
+
+      let updated = 0, added = 0, errors = 0;
+      const provMap = {};
+      proveedores.forEach(p => provMap[p.nombre.toLowerCase().trim()] = p.id);
+
+      for (const row of rows) {
+        try {
+          const nombre = String(row.nombre||'').trim();
+          if (!nombre) continue;
+
+          const costo  = parseFloat(String(row.costo||row.precio_costo||0).replace(/[^0-9.]/g,'')) || 0;
+          const precio = parseFloat(String(row.precio_venta||row.precio||0).replace(/[^0-9.]/g,'')) || 0;
+          const stock  = parseInt(row.stock) || 0;
+          const minimo = parseInt(row.stock_minimo||row.minimo) || 5;
+          const barcode= String(row.barcode||row.codigo_barras||'').trim();
+          const cat    = String(row.categoria||row.cat||'Otros').trim();
+          const provNombre = String(row.proveedor||'').trim().toLowerCase();
+          const provId = provNombre ? (provMap[provNombre]||null) : null;
+
+          // Find existing product by id or barcode or name
+          let existing = null;
+          if (row.id && row.id !== 'nuevo') {
+            existing = productos.find(p => p.id === String(row.id));
+          }
+          if (!existing && barcode) {
+            existing = productos.find(p => p.barcode && p.barcode.trim() === barcode);
+          }
+          if (!existing) {
+            existing = productos.find(p => p.nombre.toLowerCase().trim() === nombre.toLowerCase());
+          }
+
+          if (existing) {
+            // Update
+            const updated_p = { ...existing, nombre, barcode, cat, costo, precio, stock, minimo, provId };
+            await saveProducto(updated_p);
+            const idx = productos.findIndex(p => p.id === existing.id);
+            if (idx >= 0) productos[idx] = updated_p;
+            updated++;
+          } else {
+            // New product
+            const newId = 'p' + (Date.now() + added);
+            const nuevo = { id: newId, nombre, barcode, cat, costo, precio, stock, minimo, provId };
+            await saveProducto(nuevo);
+            productos.push(nuevo);
+            added++;
+          }
+        } catch(e) { errors++; console.error('Error en fila:', row, e); }
+      }
+
+      renderStockTable();
+      toast(`✅ Importado: ${updated} actualizados, ${added} nuevos${errors?' | '+errors+' errores':''}`);
+    } catch(e) {
+      toast('❌ Error leyendo el archivo: ' + e.message, 'error');
+      console.error(e);
+    }
+  };
+  reader.readAsBinaryString(file);
+  input.value = '';
+}
+window.importarExcel = importarExcel;
+
+// ── AUMENTO MASIVO ──
+function abrirModalAumento() {
+  // Populate selects
+  const provSel = document.getElementById('aumento-proveedor');
+  const catSel  = document.getElementById('aumento-cat');
+  provSel.innerHTML = '<option value="">Todos los productos</option>' +
+    proveedores.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  catSel.innerHTML = '<option value="">Todas las categorías</option>' +
+    getCategorias().map(c => `<option value="${c}">${c}</option>`).join('');
+  document.getElementById('aumento-preview').style.display = 'none';
+  document.getElementById('aumento-pct').value = '';
+  openModal('modal-aumento');
+}
+window.abrirModalAumento = abrirModalAumento;
+
+function getProductosFiltradosAumento() {
+  const provId = document.getElementById('aumento-proveedor').value;
+  const cat    = document.getElementById('aumento-cat').value;
+  return productos.filter(p => {
+    if (provId && p.provId !== provId) return false;
+    if (cat    && p.cat    !== cat)    return false;
+    return true;
+  });
+}
+
+function calcularNuevoPrecio(costo, margen, redondeo) {
+  if (!costo) return 0;
+  const precio = costo / (1 - margen / 100);
+  return redondeo > 1 ? Math.ceil(precio / redondeo) * redondeo : Math.ceil(precio);
+}
+
+function previsualizarAumento() {
+  const pct      = parseFloat(document.getElementById('aumento-pct').value);
+  const margen   = parseFloat(document.getElementById('aumento-margen').value) || 30;
+  const redondeo = parseInt(document.getElementById('aumento-redondeo').value) || 50;
+  if (isNaN(pct) || pct < 0) { toast('Ingresá un porcentaje válido', 'error'); return; }
+
+  const lista = getProductosFiltradosAumento();
+  if (!lista.length) { toast('No hay productos con ese filtro', 'error'); return; }
+
+  const muestra = lista.slice(0, 5);
+  const preview = document.getElementById('aumento-preview');
+  let html = `<strong>Vista previa (${lista.length} productos):</strong><br><br>`;
+  html += '<table style="width:100%;font-size:0.78rem;"><tr><th style="text-align:left;">Producto</th><th>Costo actual</th><th>Costo nuevo</th><th>Precio nuevo</th></tr>';
+  muestra.forEach(p => {
+    const costoNuevo  = p.costo * (1 + pct / 100);
+    const precioNuevo = calcularNuevoPrecio(costoNuevo, margen, redondeo);
+    html += `<tr>
+      <td>${p.nombre.substring(0,25)}</td>
+      <td style="text-align:right;">${fmt(p.costo)}</td>
+      <td style="text-align:right;color:var(--red);">${fmt(Math.round(costoNuevo))}</td>
+      <td style="text-align:right;color:var(--blue);font-weight:700;">${fmt(precioNuevo)}</td>
+    </tr>`;
+  });
+  if (lista.length > 5) html += `<tr><td colspan="4" style="color:var(--muted);font-size:0.72rem;">... y ${lista.length-5} productos más</td></tr>`;
+  html += '</table>';
+  preview.innerHTML = html;
+  preview.style.display = 'block';
+}
+window.previsualizarAumento = previsualizarAumento;
+
+async function aplicarAumento() {
+  const pct      = parseFloat(document.getElementById('aumento-pct').value);
+  const margen   = parseFloat(document.getElementById('aumento-margen').value) || 30;
+  const redondeo = parseInt(document.getElementById('aumento-redondeo').value) || 50;
+  if (isNaN(pct) || pct < 0) { toast('Ingresá un porcentaje válido', 'error'); return; }
+  if (!confirm(`¿Aplicar aumento de ${pct}% a ${getProductosFiltradosAumento().length} productos?`)) return;
+
+  const lista = getProductosFiltradosAumento();
+  let count = 0;
+  closeModal('modal-aumento');
+  toast('⏳ Aplicando aumento...');
+
+  for (const p of lista) {
+    const costoNuevo  = Math.round(p.costo * (1 + pct / 100) * 100) / 100;
+    const precioNuevo = calcularNuevoPrecio(costoNuevo, margen, redondeo);
+    const actualizado = { ...p, costo: costoNuevo, precio: precioNuevo };
+    await saveProducto(actualizado);
+    const idx = productos.findIndex(x => x.id === p.id);
+    if (idx >= 0) productos[idx] = actualizado;
+    count++;
+  }
+
+  renderStockTable();
+  toast(`✅ ${count} productos actualizados con +${pct}% de costo`);
+}
+window.aplicarAumento = aplicarAumento;
 // ══════════════════════════════════════════════
 function getCategorias() {
   return config.categorias || ['Golosinas','Bebidas','Snacks','Lácteos','Cigarrillos','Otros'];
@@ -2234,11 +2530,12 @@ function calcularPrecioProducto() {
   const margen  = parseFloat(document.getElementById('prod-margen-calc').value) || 0;
   const redondeo= parseInt(document.getElementById('prod-redondeo').value) || 1;
   const res     = document.getElementById('calc-result'); if(!res) return;
-  if (!costo) { res.style.display='none'; return; }
-  const exacto  = costo * (1 + margen/100);
+  if (!costo || margen >= 100) { res.style.display='none'; return; }
+  // Margen real: precio = costo / (1 - margen/100)
+  const exacto  = costo / (1 - margen / 100);
   const final   = redondeo > 1 ? Math.ceil(exacto/redondeo)*redondeo : Math.ceil(exacto);
   const ganancia= final - costo;
-  const margenR = ((ganancia/costo)*100).toFixed(1);
+  const margenR = ((ganancia/final)*100).toFixed(1);
   res.style.display='block';
   document.getElementById('calc-precio-sugerido').textContent = fmt(final);
   document.getElementById('calc-ganancia-info').textContent   = `Ganancia: ${fmt(ganancia)} — Margen real: ${margenR}%`;
@@ -2256,7 +2553,11 @@ window.calcularPrecioProducto=calcularPrecioProducto; window.aplicarPrecioCalcul
 let camaraMode = null;
 let camaraStream = null;
 let scanInterval = null;
-let quaggaActive = false;
+
+// Detect iOS Safari
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+const useIOSNative = isIOS && isSafari;
 
 function loadJsQR(cb) {
   if (window.jsQR) { cb(); return; }
@@ -2267,11 +2568,100 @@ function loadJsQR(cb) {
   document.head.appendChild(s);
 }
 
+// Load ZXing for barcode detection as alternative
+function loadZXingBrowser(cb) {
+  if (window.ZXing) { cb(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/umd/index.min.js';
+  s.onload = () => cb();
+  s.onerror = () => cb(new Error('ZXing no cargó'));
+  document.head.appendChild(s);
+}
+
+// iOS: process image from native camera/gallery using ZXing
+async function procesarImageniOS(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('ios-scan-result').textContent = '⏳ Procesando imagen...';
+  
+  try {
+    // Load ZXing for image decoding
+    loadZXingBrowser(async () => {
+      try {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = async () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            if (window.ZXing) {
+              const reader = new ZXing.MultiFormatReader();
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const luminanceSource = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
+              const binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
+              try {
+                const result = reader.decode(binaryBitmap);
+                document.getElementById('ios-scan-result').textContent = '✅ ' + result.getText();
+                cerrarCamara();
+                handleBarcodeScanned(result.getText());
+              } catch(e) {
+                document.getElementById('ios-scan-result').textContent = '❌ No se detectó código. Intentá de nuevo más cerca.';
+              }
+            } else {
+              // Fallback: jsQR
+              loadJsQR(() => {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = window.jsQR(imageData.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
+                if (code && code.data) {
+                  document.getElementById('ios-scan-result').textContent = '✅ ' + code.data;
+                  cerrarCamara();
+                  handleBarcodeScanned(code.data);
+                } else {
+                  document.getElementById('ios-scan-result').textContent = '❌ No se detectó código. Intentá de nuevo más cerca.';
+                }
+              });
+            }
+            URL.revokeObjectURL(url);
+          } catch(e) {
+            document.getElementById('ios-scan-result').textContent = '❌ Error procesando imagen.';
+          }
+        };
+        img.src = url;
+      } catch(e) {
+        document.getElementById('ios-scan-result').textContent = '❌ Error al leer la imagen.';
+      }
+    });
+  } catch(e) {
+    document.getElementById('ios-scan-result').textContent = '❌ Error: ' + e.message;
+  }
+  // Reset input so same file can be selected again
+  input.value = '';
+}
+window.procesarImageniOS = procesarImageniOS;
+
 async function abrirCamara(mode) {
   camaraMode = mode;
   document.getElementById('cam-title').textContent = mode === 'pos' ? '📷 Escanear para venta' : '📷 Escanear producto';
-  document.getElementById('cam-result').textContent = 'Iniciando cámara...';
+  document.getElementById('cam-result').textContent = '';
   openModal('modal-camara');
+
+  // iOS Safari: use native camera input
+  if (useIOSNative) {
+    document.getElementById('ios-scan-area').style.display = 'block';
+    document.getElementById('video-scan-area').style.display = 'none';
+    document.getElementById('cam-select').style.display = 'none';
+    document.getElementById('ios-scan-result').textContent = '';
+    return;
+  }
+
+  // Android / PC: video stream
+  document.getElementById('ios-scan-area').style.display = 'none';
+  document.getElementById('video-scan-area').style.display = 'block';
+  document.getElementById('cam-select').style.display = '';
 
   try {
     if (camaraStream) { camaraStream.getTracks().forEach(t=>t.stop()); camaraStream=null; }
@@ -2293,7 +2683,6 @@ async function abrirCamara(mode) {
     document.getElementById('cam-result').textContent = '🔍 Apuntá al código de barras...';
 
     if ('BarcodeDetector' in window) {
-      // Android Chrome — rápido y preciso
       const detector = new BarcodeDetector({
         formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code']
       });
@@ -2308,33 +2697,27 @@ async function abrirCamara(mode) {
         processing = false;
       }, 400);
     } else {
-      // iPhone Safari — jsQR canvas
+      // Android without BarcodeDetector: jsQR
       loadJsQR(() => {
-        if (!window.jsQR) {
-          document.getElementById('cam-result').textContent = '❌ No se pudo cargar el escáner.';
-          return;
-        }
+        if (!window.jsQR) { document.getElementById('cam-result').textContent = '❌ No se pudo cargar el escáner.'; return; }
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         let attempts = 0;
         function startScan() {
-          if ((video.readyState < 2 || video.videoWidth === 0) && attempts < 30) {
-            attempts++; setTimeout(startScan, 300); return;
-          }
+          if ((video.readyState < 2 || video.videoWidth === 0) && attempts < 30) { attempts++; setTimeout(startScan, 300); return; }
           scanInterval = setInterval(() => {
             if (!document.getElementById('modal-camara').classList.contains('open')) return;
             if (!video.videoWidth || !video.videoHeight || video.paused) return;
             try {
-              const w = video.videoWidth, h = video.videoHeight;
-              canvas.width = w; canvas.height = h;
-              ctx.drawImage(video, 0, 0, w, h);
-              const img = ctx.getImageData(0, 0, w, h);
+              canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
               const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
               if (code && code.data) procesarCodigoEscaneado(code.data);
             } catch(e) {}
           }, 200);
         }
-        setTimeout(startScan, 800);
+        setTimeout(startScan, 500);
       });
     }
 
