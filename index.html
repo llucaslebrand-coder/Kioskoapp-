@@ -2251,29 +2251,19 @@ function aplicarPrecioCalculado() {
 window.calcularPrecioProducto=calcularPrecioProducto; window.aplicarPrecioCalculado=aplicarPrecioCalculado;
 
 // ══════════════════════════════════════════════
-// CAMERA BARCODE SCANNER (Quagga2 — mejor detección EAN-13 en todos los dispositivos)
+// CAMERA BARCODE SCANNER
 // ══════════════════════════════════════════════
 let camaraMode = null;
 let camaraStream = null;
 let scanInterval = null;
-let jsQRLoaded = false;
 let quaggaActive = false;
-
-function loadQuagga(cb) {
-  if (window.Quagga) { cb(); return; }
-  const s = document.createElement('script');
-  s.src = 'https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js';
-  s.onload = () => cb();
-  s.onerror = () => { loadJsQR(cb); }; // fallback to jsQR if Quagga fails
-  document.head.appendChild(s);
-}
 
 function loadJsQR(cb) {
   if (window.jsQR) { cb(); return; }
   const s = document.createElement('script');
   s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
   s.onload = () => cb();
-  s.onerror = () => cb(new Error('jsQR no cargó'));
+  s.onerror = () => cb(new Error('no cargó'));
   document.head.appendChild(s);
 }
 
@@ -2286,7 +2276,6 @@ async function abrirCamara(mode) {
   try {
     if (camaraStream) { camaraStream.getTracks().forEach(t=>t.stop()); camaraStream=null; }
     if (scanInterval)  { clearInterval(scanInterval); scanInterval=null; }
-    if (quaggaActive)  { try { Quagga.stop(); } catch(e){} quaggaActive=false; }
 
     camaraStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
@@ -2303,8 +2292,8 @@ async function abrirCamara(mode) {
 
     document.getElementById('cam-result').textContent = '🔍 Apuntá al código de barras...';
 
-    // Use BarcodeDetector if available (Xiaomi, modern Android)
     if ('BarcodeDetector' in window) {
+      // Android Chrome — rápido y preciso
       const detector = new BarcodeDetector({
         formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code']
       });
@@ -2318,33 +2307,34 @@ async function abrirCamara(mode) {
         } catch(e) {}
         processing = false;
       }, 400);
-
     } else {
-      // Quagga2 — mejor para EAN-13 en Samsung e iPhone
-      loadQuagga(() => {
-        if (!window.Quagga) { usarJsQR(video); return; }
-        // Quagga necesita un elemento video existente
-        Quagga.init({
-          inputStream: {
-            type: 'LiveStream',
-            target: video,
-            constraints: { facingMode: 'environment' }
-          },
-          decoder: {
-            readers: ['ean_reader','ean_8_reader','code_128_reader','code_39_reader','upc_reader','upc_e_reader']
-          },
-          locate: true,
-          numOfWorkers: 2,
-          frequency: 10,
-        }, (err) => {
-          if (err) { console.error('Quagga init error:', err); usarJsQR(video); return; }
-          quaggaActive = true;
-          Quagga.start();
-          Quagga.onDetected((result) => {
-            const code = result.codeResult.code;
-            if (code) procesarCodigoEscaneado(code);
-          });
-        });
+      // iPhone Safari — jsQR canvas
+      loadJsQR(() => {
+        if (!window.jsQR) {
+          document.getElementById('cam-result').textContent = '❌ No se pudo cargar el escáner.';
+          return;
+        }
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        let attempts = 0;
+        function startScan() {
+          if ((video.readyState < 2 || video.videoWidth === 0) && attempts < 30) {
+            attempts++; setTimeout(startScan, 300); return;
+          }
+          scanInterval = setInterval(() => {
+            if (!document.getElementById('modal-camara').classList.contains('open')) return;
+            if (!video.videoWidth || !video.videoHeight || video.paused) return;
+            try {
+              const w = video.videoWidth, h = video.videoHeight;
+              canvas.width = w; canvas.height = h;
+              ctx.drawImage(video, 0, 0, w, h);
+              const img = ctx.getImageData(0, 0, w, h);
+              const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
+              if (code && code.data) procesarCodigoEscaneado(code.data);
+            } catch(e) {}
+          }, 200);
+        }
+        setTimeout(startScan, 800);
       });
     }
 
@@ -2354,40 +2344,8 @@ async function abrirCamara(mode) {
   }
 }
 
-function usarJsQR(video) {
-  loadJsQR(() => {
-    if (!window.jsQR) {
-      document.getElementById('cam-result').textContent = '❌ No se pudo cargar el escáner.';
-      return;
-    }
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    let attempts = 0;
-    function startScan() {
-      if ((video.readyState < 2 || video.videoWidth === 0) && attempts < 30) {
-        attempts++; setTimeout(startScan, 300); return;
-      }
-      scanInterval = setInterval(() => {
-        if (!document.getElementById('modal-camara').classList.contains('open')) return;
-        if (!video.videoWidth || !video.videoHeight || video.paused) return;
-        try {
-          const w = video.videoWidth, h = video.videoHeight;
-          if (canvas.width !== w) canvas.width = w;
-          if (canvas.height !== h) canvas.height = h;
-          ctx.drawImage(video, 0, 0, w, h);
-          const img = ctx.getImageData(0, 0, w, h);
-          const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
-          if (code && code.data) procesarCodigoEscaneado(code.data);
-        } catch(e) {}
-      }, 200);
-    }
-    setTimeout(startScan, 500);
-  });
-}
-
 async function cambiarCamara(deviceId) {
   if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
-  if (quaggaActive) { try { Quagga.stop(); } catch(e){} quaggaActive = false; }
   if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); }
   try {
     camaraStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
@@ -2399,8 +2357,6 @@ async function cambiarCamara(deviceId) {
 
 function cerrarCamara() {
   if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
-  if (quaggaActive) { try { Quagga.stop(); } catch(e){} quaggaActive = false; }
-  if (window._zxingReader) { try { window._zxingReader.reset(); } catch(e){} window._zxingReader = null; }
   if (camaraStream) { camaraStream.getTracks().forEach(t => t.stop()); camaraStream = null; }
   const video = document.getElementById('cam-video');
   if (video) { video.srcObject = null; }
