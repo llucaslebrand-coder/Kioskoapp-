@@ -320,6 +320,7 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
     <button class="nav-btn admin-only" onclick="openModal('modal-categorias');renderCategoriasList()" style="cursor:pointer;"><span class="icon">🏷️</span> Categorías</button>
     <button class="nav-btn admin-only" onclick="navTo('historial',event)"><span class="icon">📋</span> Historial</button>
     <button class="nav-btn emp-only" onclick="navTo('historial-empleado',event)"><span class="icon">📋</span> Mis ventas</button>
+    <button class="nav-btn emp-only" onclick="navTo('stock-consulta',event)"><span class="icon">📦</span> Stock</button>
     <button class="nav-btn admin-only" onclick="navTo('proveedores',event)"><span class="icon">🚚</span> Proveedores</button>
     <button class="nav-btn admin-only" onclick="navTo('pedidos',event)"><span class="icon">📲</span> Pedidos WhatsApp</button>
     <div class="nav-section admin-only">Administración</div>
@@ -496,6 +497,25 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
     <table>
       <thead><tr><th>#</th><th>Hora</th><th>Productos</th><th>Pago</th><th>Total</th><th>Estado</th><th></th></tr></thead>
       <tbody id="hemp-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- STOCK CONSULTA (USUARIO) -->
+<div class="page" id="page-stock-consulta">
+  <div class="page-header">
+    <h2 class="page-title">📦 Consulta de Stock</h2>
+  </div>
+  <div style="display:flex;gap:9px;margin-bottom:14px;flex-wrap:wrap;">
+    <input class="search-bar" placeholder="🔍 Buscar producto..." id="sc-search" oninput="renderStockConsulta()" style="flex:1;min-width:160px;">
+    <select class="search-bar" style="width:160px;" id="sc-cat" onchange="renderStockConsulta()">
+      <option value="">Todas las categorías</option>
+    </select>
+  </div>
+  <div class="table-wrap table-scroll">
+    <table>
+      <thead><tr><th>Producto / Código</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Estado</th></tr></thead>
+      <tbody id="sc-tbody"></tbody>
     </table>
   </div>
 </div>
@@ -958,6 +978,18 @@ tbody td{padding:10px 14px;font-size:0.85rem;}
   </div>
 </div>
 
+<!-- MODAL COMPROBANTE POST-VENTA -->
+<div class="modal-overlay" id="modal-comprobante">
+  <div class="modal" style="width:440px;max-width:100%;">
+    <h2 style="display:flex;align-items:center;gap:8px;">🧾 Comprobante de venta</h2>
+    <div id="comprobante-body" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;font-size:0.85rem;line-height:1.7;"></div>
+    <div style="display:flex;gap:9px;flex-wrap:wrap;">
+      <button class="btn btn-ghost" style="flex:1;justify-content:center;" onclick="imprimirComprobante()">🖨️ Imprimir / PDF</button>
+      <button class="btn btn-primary" style="flex:1;justify-content:center;" onclick="cerrarComprobante()">✔ Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -1350,6 +1382,7 @@ function navTo(id, ev) {
   if (id==='stock') renderStockTable();
   if (id==='historial') renderHistorial();
   if (id==='historial-empleado') renderHistorialEmpleado();
+  if (id==='stock-consulta') renderStockConsulta();
   if (id==='proveedores') renderProveedores();
   if (id==='pedidos') renderPedidos();
   if (id==='rentabilidad') renderRentabilidad();
@@ -1504,7 +1537,8 @@ async function cobrar(){
   if(!cart.length){toast('El carrito está vacío','error');return;}
   const total=cart.reduce((s,it)=>s+it.precio*it.qty,0);
   const vid=nextVentaId();
-  const venta={id:vid,ts:Date.now(),items:cart.map(it=>({...it})),total,pago:payMethod,anulada:false};
+  const ventaItems=cart.map(it=>({...it}));
+  const venta={id:vid,ts:Date.now(),items:ventaItems,total,pago:payMethod,anulada:false};
   // Descuento de stock
   for(const it of cart){
     const p=productos.find(x=>x.id===it.id);
@@ -1514,8 +1548,91 @@ async function cobrar(){
   await saveVenta(venta);
   toast(`Venta registrada: ${fmt(total)}`);
   clearCart(); renderPosGrid();
+  mostrarComprobante(venta);
 }
 window.cobrar=cobrar;
+
+// ══════════════════════════════════════════════
+// COMPROBANTE POST-VENTA
+// ══════════════════════════════════════════════
+let _comprobanteVenta=null;
+
+function mostrarComprobante(venta){
+  _comprobanteVenta=venta;
+  const fecha=new Date(venta.ts);
+  const fechaStr=fecha.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const horaStr=fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  const filas=venta.items.map(it=>`
+    <tr>
+      <td style="padding:6px 8px;">${it.nombre}</td>
+      <td style="padding:6px 8px;text-align:center;">${it.qty}</td>
+      <td style="padding:6px 8px;text-align:right;">${fmt(it.precio)}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:600;">${fmt(it.precio*it.qty)}</td>
+    </tr>`).join('');
+  const html=`
+    <div style="text-align:center;margin-bottom:12px;">
+      <div style="font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:800;color:var(--blue);">🛒 KioscoApp</div>
+      <div style="font-size:0.75rem;color:var(--muted);">Golosinas & Bebidas</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:0.78rem;color:var(--muted);margin-bottom:10px;">
+      <span>📅 ${fechaStr} ${horaStr}</span>
+      <span>N° ${venta.id}</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+      <thead>
+        <tr style="background:var(--surface2);font-size:0.73rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">
+          <th style="padding:6px 8px;text-align:left;">Producto</th>
+          <th style="padding:6px 8px;text-align:center;">Cant.</th>
+          <th style="padding:6px 8px;text-align:right;">P.Unit.</th>
+          <th style="padding:6px 8px;text-align:right;">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody style="border-top:1px solid var(--border);">${filas}</tbody>
+    </table>
+    <div style="border-top:2px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:0.78rem;color:var(--muted);">Forma de pago</div>
+        <div style="font-weight:600;font-size:0.9rem;">${venta.pago}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:0.78rem;color:var(--muted);">TOTAL</div>
+        <div style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;color:var(--blue);">${fmt(venta.total)}</div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:12px;font-size:0.72rem;color:var(--muted);border-top:1px dashed var(--border);padding-top:10px;">
+      Gracias por su compra ✨
+    </div>`;
+  document.getElementById('comprobante-body').innerHTML=html;
+  document.getElementById('modal-comprobante').classList.add('open');
+}
+window.mostrarComprobante=mostrarComprobante;
+
+function cerrarComprobante(){
+  document.getElementById('modal-comprobante').classList.remove('open');
+  _comprobanteVenta=null;
+}
+window.cerrarComprobante=cerrarComprobante;
+
+function imprimirComprobante(){
+  const body=document.getElementById('comprobante-body').innerHTML;
+  const win=window.open('','_blank','width=400,height=600');
+  win.document.write(`<!DOCTYPE html><html><head>
+    <meta charset="UTF-8">
+    <title>Comprobante de Venta</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap');
+      *{box-sizing:border-box;margin:0;padding:0;}
+      body{font-family:'DM Sans',sans-serif;color:#1a1f36;background:#fff;padding:24px;max-width:380px;margin:0 auto;}
+      table{width:100%;border-collapse:collapse;}
+      th,td{padding:6px 8px;}
+      tr{border-top:1px solid #dde2ef;}
+    </style>
+  </head><body>${body}
+  <script>window.onload=function(){window.print();}<\/script>
+  </body></html>`);
+  win.document.close();
+}
+window.imprimirComprobante=imprimirComprobante;
 
 // ══════════════════════════════════════════════
 // STOCK
@@ -1545,7 +1662,29 @@ function renderStockTable(){
 }
 window.renderStockTable=renderStockTable;
 
-function updateProvSelect(){
+function renderStockConsulta(){
+  const q=(document.getElementById('sc-search')||{value:''}).value.toLowerCase();
+  const cat=(document.getElementById('sc-cat')||{value:''}).value;
+  // Populate category select if empty
+  const scCat=document.getElementById('sc-cat');
+  if(scCat && scCat.options.length<=1){
+    const cats=[...new Set(productos.map(p=>p.cat).filter(Boolean))].sort();
+    cats.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; scCat.appendChild(o); });
+  }
+  const filtered=productos.filter(p=>p.nombre.toLowerCase().includes(q)&&(cat===''||p.cat===cat));
+  const el=document.getElementById('sc-tbody'); if(!el) return;
+  el.innerHTML=filtered.length?filtered.map(p=>{
+    const low=p.stock<=(p.minimo||5);
+    return `<tr>
+      <td><strong>${p.nombre}</strong><br><span style="font-size:0.68rem;color:var(--muted);font-family:monospace;">${p.barcode||'—'}</span></td>
+      <td>${p.cat||'—'}</td>
+      <td style="color:var(--accent);font-weight:700;">${fmt(p.precio)}</td>
+      <td><strong style="${low?'color:var(--red)':''}">${p.stock}</strong></td>
+      <td><span class="badge ${low?'badge-red':'badge-green'}">${low?'⚠ Bajo':'OK'}</span></td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="5" class="empty-state">Sin productos</td></tr>`;
+}
+window.renderStockConsulta=renderStockConsulta;
   const sel=document.getElementById('prod-proveedor'); if(!sel) return;
   sel.innerHTML='<option value="">Sin proveedor</option>'+proveedores.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('');
 }
