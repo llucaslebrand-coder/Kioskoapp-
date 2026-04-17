@@ -1685,6 +1685,8 @@ function renderStockConsulta(){
   }).join(''):`<tr><td colspan="5" class="empty-state">Sin productos</td></tr>`;
 }
 window.renderStockConsulta=renderStockConsulta;
+
+function updateProvSelect(){
   const sel=document.getElementById('prod-proveedor'); if(!sel) return;
   sel.innerHTML='<option value="">Sin proveedor</option>'+proveedores.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('');
 }
